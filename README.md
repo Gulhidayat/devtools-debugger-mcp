@@ -14,6 +14,7 @@ This type of MCP Server is useful When you need to manually configure your brows
 - Navigate tabs to URLs
 - Query DOM elements
 - Click elements with console output capture
+- Debug Node.js scripts with breakpoints and stepping
 
 ## Installation
 
@@ -178,6 +179,41 @@ Returns:
 - Object containing:
   - `message`: Success/failure message
   - `consoleOutput`: Array of console messages triggered by the click
+
+### Node.js Debugger Tools
+
+These tools allow debugging Node.js scripts via the Chrome DevTools Protocol.
+
+### start_node_debug
+Starts a Node.js process with the inspector and pauses on the first line.
+Parameters:
+- `scriptPath`: Path to the Node.js script to debug
+
+### set_breakpoint
+Sets a breakpoint in a file.
+Parameters:
+- `filePath`: Path of the script file
+- `line`: 1-based line number to break at
+
+### resume_execution
+Continues running the script until the next breakpoint or completion.
+
+### step_over
+Executes the next line, stepping over function calls.
+
+### step_into
+Steps into the next function call.
+
+### step_out
+Steps out of the current function.
+
+### evaluate_expression
+Evaluates a JavaScript expression in the current pause context.
+Parameters:
+- `expr`: Expression to evaluate
+
+### stop_debug_session
+Stops the active debug session and cleans up resources.
 
 ## License
 
