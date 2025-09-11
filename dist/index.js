@@ -4,6 +4,8 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { ChromeAPI } from './chrome-api.js';
 import { processImage, saveImage } from './image-utils.js';
 import { z } from 'zod';
+import { spawn } from 'child_process';
+import CDP from 'chrome-remote-interface';
 // Get Chrome debug URL from environment variable or use default
 const chromeDebugUrl = process.env.CHROME_DEBUG_URL || 'http://localhost:9222';
 console.error(`Using Chrome debug URL: ${chromeDebugUrl}`);
@@ -13,6 +15,12 @@ const server = new McpServer({
     name: 'chrome-tools',
     version: '1.3.0'
 });
+// Node.js debugging state
+let nodeDebugClient = null;
+let nodeProcess = null;
+let scriptIdToUrl = {};
+let consoleMessages = [];
+let lastPausedParams = null;
 // Add the list_tabs tool
 server.tool('list_tabs', {}, // No input parameters needed
 async () => {
@@ -254,6 +262,494 @@ server.tool('click_element', {
                     type: 'text',
                     text: `Error: ${errorMessage}`
                 }],
+            isError: true
+        };
+    }
+});
+// Node.js debugging tools
+server.tool('start_node_debug', { scriptPath: z.string().describe('Path to the Node.js script to debug') }, async (params) => {
+    if (nodeDebugClient) {
+        return {
+            content: [{ type: 'text', text: 'Error: A debug session is already active.' }],
+            isError: true
+        };
+    }
+    try {
+        const scriptPath = params.scriptPath;
+        nodeProcess = spawn('node', ['--inspect-brk=0', scriptPath], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env, NODE_OPTIONS: '' }
+        });
+        const inspectorPort = await new Promise((resolve, reject) => {
+            let resolved = false;
+            nodeProcess?.stderr?.on('data', (data) => {
+                const msg = data.toString();
+                const match = msg.match(/ws:\/\/127\.0\.0\.1:(\d+)/);
+                if (match) {
+                    resolved = true;
+                    resolve(Number(match[1]));
+                }
+            });
+            nodeProcess?.on('exit', () => {
+                if (!resolved) {
+                    reject(new Error('Node process exited before debugger attached'));
+                }
+            });
+        });
+        nodeDebugClient = await CDP({ host: '127.0.0.1', port: inspectorPort });
+        const pausedPromise = new Promise((resolve) => {
+            nodeDebugClient.Debugger.paused((params) => {
+                lastPausedParams = params;
+                resolve(params);
+            });
+        });
+        await nodeDebugClient.Debugger.enable();
+        await nodeDebugClient.Runtime.enable();
+        scriptIdToUrl = {};
+        consoleMessages = [];
+        nodeDebugClient.Debugger.scriptParsed(({ scriptId, url }) => {
+            if (url)
+                scriptIdToUrl[scriptId] = url;
+        });
+        nodeDebugClient.Runtime.consoleAPICalled(({ type, args }) => {
+            const text = args
+                .map((arg) => (arg.value !== undefined ? arg.value : arg.description))
+                .join(' ');
+            consoleMessages.push(`[${type}] ${text}`);
+        });
+        const pausedEvent = await pausedPromise;
+        const callFrame = pausedEvent.callFrames[0];
+        const scriptId = callFrame.location.scriptId;
+        const fileUrl = scriptIdToUrl[scriptId] || callFrame.url || '<unknown>';
+        const line = callFrame.location.lineNumber + 1;
+        consoleMessages = [];
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `Debugger attached. Paused at ${fileUrl}:${line} (reason: ${pausedEvent.reason}).`
+                }
+            ]
+        };
+    }
+    catch (error) {
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `Error: Failed to start debug session - ${error instanceof Error ? error.message : error}`
+                }
+            ],
+            isError: true
+        };
+    }
+});
+server.tool('set_breakpoint', {
+    filePath: z
+        .string()
+        .describe('Path of the script file to break in'),
+    line: z.number().describe('1-based line number to set breakpoint at')
+}, async (params) => {
+    if (!nodeDebugClient) {
+        return {
+            content: [{ type: 'text', text: 'Error: No active debug session.' }],
+            isError: true
+        };
+    }
+    try {
+        const fileUrl = params.filePath.startsWith('file://')
+            ? params.filePath
+            : 'file://' + params.filePath;
+        const lineNumber = params.line - 1;
+        const { breakpointId } = await nodeDebugClient.Debugger.setBreakpointByUrl({
+            url: fileUrl,
+            lineNumber,
+            columnNumber: 0
+        });
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `Breakpoint set at ${params.filePath}:${params.line} (ID: ${breakpointId}).`
+                }
+            ]
+        };
+    }
+    catch (error) {
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `Error: Failed to set breakpoint - ${error instanceof Error ? error.message : error}`
+                }
+            ],
+            isError: true
+        };
+    }
+});
+server.tool('resume_execution', {}, async () => {
+    if (!nodeDebugClient) {
+        return {
+            content: [{ type: 'text', text: 'Error: No active debug session.' }],
+            isError: true
+        };
+    }
+    try {
+        const pausePromise = new Promise((resolve) => {
+            nodeDebugClient.Debugger.paused((params) => {
+                lastPausedParams = params;
+                resolve(params);
+            });
+        });
+        const exitPromise = new Promise((resolve) => {
+            nodeProcess?.once('exit', () => resolve(null));
+        });
+        await nodeDebugClient.Debugger.resume();
+        const result = await Promise.race([pausePromise, exitPromise]);
+        if (result && typeof result === 'object') {
+            const params = result;
+            const topFrame = params.callFrames[0];
+            const fileUrl = topFrame.url ||
+                scriptIdToUrl[topFrame.location.scriptId] ||
+                '<unknown>';
+            const line = topFrame.location.lineNumber + 1;
+            const output = consoleMessages.slice();
+            consoleMessages = [];
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify({
+                            status: `Paused at ${fileUrl}:${line} (reason: ${params.reason})`,
+                            consoleOutput: output
+                        }, null, 2)
+                    }
+                ]
+            };
+        }
+        else {
+            const exitCode = nodeProcess?.exitCode;
+            await nodeDebugClient.close();
+            nodeDebugClient = null;
+            nodeProcess = null;
+            scriptIdToUrl = {};
+            lastPausedParams = null;
+            consoleMessages = [];
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `Execution resumed until completion. Process exited with code ${exitCode}.`
+                    }
+                ]
+            };
+        }
+    }
+    catch (error) {
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `Error: Resume failed - ${error instanceof Error ? error.message : error}`
+                }
+            ],
+            isError: true
+        };
+    }
+});
+server.tool('step_over', {}, async () => {
+    if (!nodeDebugClient) {
+        return {
+            content: [{ type: 'text', text: 'Error: No active debug session.' }],
+            isError: true
+        };
+    }
+    try {
+        const pausePromise = new Promise((resolve) => {
+            nodeDebugClient.Debugger.paused((params) => {
+                lastPausedParams = params;
+                resolve(params);
+            });
+        });
+        const exitPromise = new Promise((resolve) => {
+            nodeProcess?.once('exit', () => resolve(null));
+        });
+        await nodeDebugClient.Debugger.stepOver();
+        const result = await Promise.race([pausePromise, exitPromise]);
+        if (result && typeof result === 'object') {
+            const params = result;
+            const topFrame = params.callFrames[0];
+            const fileUrl = topFrame.url ||
+                scriptIdToUrl[topFrame.location.scriptId] ||
+                '<unknown>';
+            const line = topFrame.location.lineNumber + 1;
+            const output = consoleMessages.slice();
+            consoleMessages = [];
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify({
+                            status: `Paused at ${fileUrl}:${line} (reason: ${params.reason})`,
+                            consoleOutput: output
+                        }, null, 2)
+                    }
+                ]
+            };
+        }
+        else {
+            const exitCode = nodeProcess?.exitCode;
+            await nodeDebugClient.close();
+            nodeDebugClient = null;
+            nodeProcess = null;
+            scriptIdToUrl = {};
+            lastPausedParams = null;
+            consoleMessages = [];
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `Execution resumed until completion. Process exited with code ${exitCode}.`
+                    }
+                ]
+            };
+        }
+    }
+    catch (error) {
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `Error: Step over failed - ${error instanceof Error ? error.message : error}`
+                }
+            ],
+            isError: true
+        };
+    }
+});
+server.tool('step_into', {}, async () => {
+    if (!nodeDebugClient) {
+        return {
+            content: [{ type: 'text', text: 'Error: No active debug session.' }],
+            isError: true
+        };
+    }
+    try {
+        const pausePromise = new Promise((resolve) => {
+            nodeDebugClient.Debugger.paused((params) => {
+                lastPausedParams = params;
+                resolve(params);
+            });
+        });
+        const exitPromise = new Promise((resolve) => {
+            nodeProcess?.once('exit', () => resolve(null));
+        });
+        await nodeDebugClient.Debugger.stepInto();
+        const result = await Promise.race([pausePromise, exitPromise]);
+        if (result && typeof result === 'object') {
+            const params = result;
+            const topFrame = params.callFrames[0];
+            const fileUrl = topFrame.url ||
+                scriptIdToUrl[topFrame.location.scriptId] ||
+                '<unknown>';
+            const line = topFrame.location.lineNumber + 1;
+            const output = consoleMessages.slice();
+            consoleMessages = [];
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify({
+                            status: `Paused at ${fileUrl}:${line} (reason: ${params.reason})`,
+                            consoleOutput: output
+                        }, null, 2)
+                    }
+                ]
+            };
+        }
+        else {
+            const exitCode = nodeProcess?.exitCode;
+            await nodeDebugClient.close();
+            nodeDebugClient = null;
+            nodeProcess = null;
+            scriptIdToUrl = {};
+            lastPausedParams = null;
+            consoleMessages = [];
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `Execution resumed until completion. Process exited with code ${exitCode}.`
+                    }
+                ]
+            };
+        }
+    }
+    catch (error) {
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `Error: Step into failed - ${error instanceof Error ? error.message : error}`
+                }
+            ],
+            isError: true
+        };
+    }
+});
+server.tool('step_out', {}, async () => {
+    if (!nodeDebugClient) {
+        return {
+            content: [{ type: 'text', text: 'Error: No active debug session.' }],
+            isError: true
+        };
+    }
+    try {
+        const pausePromise = new Promise((resolve) => {
+            nodeDebugClient.Debugger.paused((params) => {
+                lastPausedParams = params;
+                resolve(params);
+            });
+        });
+        const exitPromise = new Promise((resolve) => {
+            nodeProcess?.once('exit', () => resolve(null));
+        });
+        await nodeDebugClient.Debugger.stepOut();
+        const result = await Promise.race([pausePromise, exitPromise]);
+        if (result && typeof result === 'object') {
+            const params = result;
+            const topFrame = params.callFrames[0];
+            const fileUrl = topFrame.url ||
+                scriptIdToUrl[topFrame.location.scriptId] ||
+                '<unknown>';
+            const line = topFrame.location.lineNumber + 1;
+            const output = consoleMessages.slice();
+            consoleMessages = [];
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify({
+                            status: `Paused at ${fileUrl}:${line} (reason: ${params.reason})`,
+                            consoleOutput: output
+                        }, null, 2)
+                    }
+                ]
+            };
+        }
+        else {
+            const exitCode = nodeProcess?.exitCode;
+            await nodeDebugClient.close();
+            nodeDebugClient = null;
+            nodeProcess = null;
+            scriptIdToUrl = {};
+            lastPausedParams = null;
+            consoleMessages = [];
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `Execution resumed until completion. Process exited with code ${exitCode}.`
+                    }
+                ]
+            };
+        }
+    }
+    catch (error) {
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `Error: Step out failed - ${error instanceof Error ? error.message : error}`
+                }
+            ],
+            isError: true
+        };
+    }
+});
+server.tool('evaluate_expression', {
+    expr: z
+        .string()
+        .describe('JavaScript expression to evaluate in current pause context')
+}, async (params) => {
+    if (!nodeDebugClient || !lastPausedParams) {
+        return {
+            content: [{ type: 'text', text: 'Error: No active pause state.' }],
+            isError: true
+        };
+    }
+    try {
+        const callFrameId = lastPausedParams.callFrames[0].callFrameId;
+        const evalResponse = await nodeDebugClient.Debugger.evaluateOnCallFrame({
+            callFrameId,
+            expression: params.expr,
+            includeCommandLineAPI: true,
+            returnByValue: true
+        });
+        if (evalResponse.exceptionDetails) {
+            const text = evalResponse.exceptionDetails.exception?.description ||
+                evalResponse.exceptionDetails.text;
+            return {
+                content: [{ type: 'text', text: `Error: ${text}` }],
+                isError: true
+            };
+        }
+        const resultObj = evalResponse.result;
+        let output;
+        if (resultObj.value !== undefined) {
+            output = resultObj.value;
+        }
+        else {
+            output = resultObj.description || resultObj.type;
+        }
+        const outputLogs = consoleMessages.slice();
+        consoleMessages = [];
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify({ result: output, consoleOutput: outputLogs }, null, 2)
+                }
+            ]
+        };
+    }
+    catch (error) {
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `Error: Evaluation failed - ${error instanceof Error ? error.message : error}`
+                }
+            ],
+            isError: true
+        };
+    }
+});
+server.tool('stop_debug_session', {}, async () => {
+    try {
+        if (nodeProcess) {
+            nodeProcess.kill();
+            nodeProcess = null;
+        }
+        if (nodeDebugClient) {
+            await nodeDebugClient.close();
+            nodeDebugClient = null;
+        }
+        scriptIdToUrl = {};
+        consoleMessages = [];
+        lastPausedParams = null;
+        return {
+            content: [{ type: 'text', text: 'Debug session terminated.' }]
+        };
+    }
+    catch (error) {
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: `Error: Failed to stop debug session - ${error instanceof Error ? error.message : error}`
+                }
+            ],
             isError: true
         };
     }
