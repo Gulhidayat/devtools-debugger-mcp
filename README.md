@@ -1,25 +1,23 @@
-# Chrome Tools MCP Server
+# devtools-debugger-mcp
 
-An MCP server that provides tools for interacting with Chrome through its DevTools Protocol. This server enables remote control of Chrome tabs, including executing JavaScript, capturing screenshots, monitoring network traffic, and more.
+An MCP server exposing full Chrome DevTools Protocol debugging for Node.js applications (breakpoints, stepping, scopes, call stacks, eval, and source maps) and Chrome tab automation (JS execution, screenshots, network monitoring, navigation, DOM actions).
 
 ## Why use an MCP server like this?
 This type of MCP Server is useful When you need to manually configure your browser to be in a certain state before you let an AI tool like Cline poke at it. You can also use this tool to listen to and pull network events into its context. 
 
 ## Features
 
-- List Chrome tabs
-- Execute JavaScript in tabs
-- Capture screenshots
-- Monitor network traffic
-- Navigate tabs to URLs
-- Query DOM elements
-- Click elements with console output capture
-- Debug Node.js scripts with breakpoints and stepping
+- Full Node.js debugger: breakpoints, conditional breakpoints, logpoints, pause-on-exceptions
+- Stepping: step over/into/out, continue to location, restart frame
+- Inspection: locals/closure scopes, `this` preview, object property drill-down
+- Evaluate expressions in the current call frame with console capture
+- Call-stack and pause-state introspection
+- Chrome automation: list tabs, execute JS, navigate, capture screenshots, query/click DOM, monitor network
 
 ## Installation
 
 ```bash
-npm install @nicholmikey/chrome-tools
+npm install devtools-debugger-mcp
 ```
 
 ## Configuration
@@ -28,9 +26,9 @@ The server can be configured through environment variables in your MCP settings:
 
 ```json
 {
-  "chrome-tools": {
+  "devtools-debugger-mcp": {
     "command": "node",
-    "args": ["path/to/chrome-tools/dist/index.js"],
+    "args": ["path/to/devtools-debugger-mcp/dist/index.js"],
     "env": {
       "CHROME_DEBUG_URL": "http://localhost:9222",
       "CHROME_CONNECTION_TYPE": "direct",
@@ -39,6 +37,83 @@ The server can be configured through environment variables in your MCP settings:
   }
 }
 ```
+
+Alternatively, if installed locally, you can point to the CLI binary:
+
+```json
+{
+  "devtools-debugger-mcp": {
+    "command": "devtools-debugger-mcp",
+    "env": {
+      "CHROME_DEBUG_URL": "http://localhost:9222"
+    }
+  }
+}
+```
+
+## Node.js Debugging
+
+This MCP server can debug Node.js programs by launching your script with the built‑in inspector (`--inspect-brk=0`) and speaking the Chrome DevTools Protocol (CDP).
+
+How it works
+- `start_node_debug` spawns `node --inspect-brk=0 your-script.js`, waits for the inspector WebSocket, attaches, and returns the initial pause (first line) with a `pauseId` and top call frame.
+- You can then set breakpoints (by file path or URL regex), choose pause-on-exceptions, and resume/step. At each pause, tools can inspect scopes, evaluate expressions, and read console output captured since the last step/resume.
+- When the process exits, the server cleans up the CDP session and resets its state.
+
+Quickstart (from an MCP-enabled client)
+1) Start a debug session
+```json
+{ "tool": "start_node_debug", "params": { "scriptPath": "/absolute/path/to/app.js" } }
+```
+2) Set a breakpoint (file path + 1-based line)
+```json
+{ "tool": "set_breakpoint", "params": { "filePath": "/absolute/path/to/app.js", "line": 42 } }
+```
+3) Run to next pause (optionally include console/stack)
+```json
+{ "tool": "resume_execution", "params": { "includeConsole": true, "includeStack": true } }
+```
+4) Inspect at a pause
+```json
+{ "tool": "inspect_scopes", "params": { "maxProps": 15 } }
+{ "tool": "evaluate_expression", "params": { "expr": "user.name" } }
+```
+5) Step
+```json
+{ "tool": "step_over" }
+{ "tool": "step_into" }
+{ "tool": "step_out" }
+```
+6) Finish
+```json
+{ "tool": "stop_debug_session" }
+```
+
+Node.js tool reference (summary)
+- `start_node_debug({ scriptPath, format? })` — Launches Node with inspector and returns initial pause.
+- `set_breakpoint({ filePath, line })` — Breakpoint by file path (1-based line).
+- `set_breakpoint_condition({ filePath?, urlRegex?, line, column?, condition, format? })` — Conditional breakpoint or by URL regex.
+- `add_logpoint({ filePath?, urlRegex?, line, column?, message, format? })` — Logpoint via conditional breakpoint that logs and returns `false`.
+- `set_exception_breakpoints({ state })` — `none | uncaught | all`.
+- `blackbox_scripts({ patterns })` — Ignore frames from matching script URLs.
+- `list_scripts()` / `get_script_source({ scriptId? | url? })` — Discover and fetch script sources.
+- `continue_to_location({ filePath, line, column? })` — Run until a specific source location.
+- `restart_frame({ frameIndex, pauseId?, format? })` — Re-run the selected frame.
+- `resume_execution({ includeScopes?, includeStack?, includeConsole?, format? })` — Continue to next pause or exit.
+- `step_over|step_into|step_out({ includeScopes?, includeStack?, includeConsole?, format? })` — Stepping with optional context in the result.
+- `evaluate_expression({ expr, pauseId?, frameIndex?, returnByValue?, format? })` — Evaluate in a paused frame; defaults to top frame.
+- `inspect_scopes({ maxProps?, pauseId?, frameIndex?, includeThisPreview?, format? })` — Locals/closures and `this` summary.
+- `get_object_properties({ objectId, maxProps?, format? })` — Drill into object previews.
+- `list_call_stack({ depth?, pauseId?, includeThis?, format? })` — Top N frames summary.
+- `get_pause_info({ pauseId?, format? })` — Pause reason/location summary.
+- `read_console({ format? })` — Console messages since the last step/resume.
+- `stop_debug_session()` — Kill process and detach.
+
+Notes
+- File paths are converted to `file://` URLs internally for CDP compatibility.
+- `line` is 1-based; CDP is 0-based internally.
+- The server buffers console output between pauses; fetch via `includeConsole` on step/resume or with `read_console`.
+- Use `set_output_format({ format: 'text' | 'json' | 'both' })` to set default response formatting.
 
 ### Environment Variables
 
@@ -182,38 +257,7 @@ Returns:
 
 ### Node.js Debugger Tools
 
-These tools allow debugging Node.js scripts via the Chrome DevTools Protocol.
-
-### start_node_debug
-Starts a Node.js process with the inspector and pauses on the first line.
-Parameters:
-- `scriptPath`: Path to the Node.js script to debug
-
-### set_breakpoint
-Sets a breakpoint in a file.
-Parameters:
-- `filePath`: Path of the script file
-- `line`: 1-based line number to break at
-
-### resume_execution
-Continues running the script until the next breakpoint or completion.
-
-### step_over
-Executes the next line, stepping over function calls.
-
-### step_into
-Steps into the next function call.
-
-### step_out
-Steps out of the current function.
-
-### evaluate_expression
-Evaluates a JavaScript expression in the current pause context.
-Parameters:
-- `expr`: Expression to evaluate
-
-### stop_debug_session
-Stops the active debug session and cleans up resources.
+See the dedicated "Node.js Debugging" section above for quickstart and the complete tool reference.
 
 ## License
 

@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 const require = createRequire(import.meta.url);
 const sharp = require('sharp');
 
-export const SCREENSHOT_DIR = path.join('/tmp', 'chrome-tools-screenshots');
+export const SCREENSHOT_DIR = path.join('/tmp', 'devtools-debugger-mcp-screenshots');
 
 export interface ProcessedImage {
     data: string;
