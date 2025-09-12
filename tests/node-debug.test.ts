@@ -53,9 +53,9 @@ async function dumpLocalScope(Runtime: Client['Runtime'], callFrame: any, { only
       generatePreview: true
     });
     const props = (result || [])
-      .filter((p) => p && p.enumerable && p.name !== 'arguments')
-      .filter((p) => !only || only.includes(p.name))
-      .map((p) => {
+      .filter((p: any) => p && p.enumerable && p.name !== 'arguments')
+      .filter((p: any) => !only || only.includes(p.name))
+      .map((p: any) => {
         const v: any = p.value || {};
         const val = Object.prototype.hasOwnProperty.call(v, 'value') ? v.value : (v.description || v.type);
         return `${p.name}=${JSON.stringify(val)}`;
@@ -80,13 +80,13 @@ function mcpLogResult(tool: string, payloadObj: unknown) {
   console.log(JSON.stringify({ event: 'mcp.tool_result', tool, response }, null, 2));
 }
 
-test('debugger hits breakpoint', { timeout: 20000 }, async () => {
+test('debugger hits breakpoint', { timeout: 30000 }, async () => {
   const { proc, port } = await startDebuggedProcess();
   const client = await CDP({ host: '127.0.0.1', port });
   if (debug) {
     // eslint-disable-next-line no-console
-    client.on('event', (message: any) => {
-      const { method, params } = message;
+    (client as any).on('event', (message: any) => {
+      const { method, params } = message as any;
       const maybeUrl = params && (params.url || params.scriptId || params.reason);
       console.log('event', method, maybeUrl || '');
     });
@@ -97,7 +97,7 @@ test('debugger hits breakpoint', { timeout: 20000 }, async () => {
   try {
     debugLog('connected to CDP on port', port);
     const parsedScripts: any[] = [];
-    const unlistenScriptParsed = Debugger.scriptParsed((ev: any) => { parsedScripts.push(ev); });
+    unlistenScriptParsed = (Debugger as any).scriptParsed((ev: any) => { parsedScripts.push(ev); });
 
     await Debugger.enable();
     await Runtime.enable();

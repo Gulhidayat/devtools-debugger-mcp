@@ -1,18 +1,19 @@
-# devtools-debugger-mcp
+# Node.js Debugger MCP
 
-An MCP server exposing full Chrome DevTools Protocol debugging for Node.js applications (breakpoints, stepping, scopes, call stacks, eval, and source maps) and Chrome tab automation (JS execution, screenshots, network monitoring, navigation, DOM actions).
+An MCP server that provides comprehensive Node.js debugging capabilities using the Chrome DevTools Protocol. This server enables AI assistants to debug Node.js applications with full access to breakpoints, stepping, variable inspection, call stacks, expression evaluation, and source maps.
 
-## Why use an MCP server like this?
-This type of MCP Server is useful When you need to manually configure your browser to be in a certain state before you let an AI tool like Cline poke at it. You can also use this tool to listen to and pull network events into its context. 
+## Why use this MCP server?
+This MCP server is useful when you need AI assistance with debugging Node.js applications. It provides programmatic access to all the debugging features you'd find in Chrome DevTools or VS Code, allowing AI assistants to help you set breakpoints, inspect variables, step through code, and analyze runtime behavior. 
 
 ## Features
 
-- Full Node.js debugger: breakpoints, conditional breakpoints, logpoints, pause-on-exceptions
-- Stepping: step over/into/out, continue to location, restart frame
-- Inspection: locals/closure scopes, `this` preview, object property drill-down
-- Evaluate expressions in the current call frame with console capture
-- Call-stack and pause-state introspection
-- Chrome automation: list tabs, execute JS, navigate, capture screenshots, query/click DOM, monitor network
+- **Full Node.js debugger**: Set breakpoints, conditional breakpoints, logpoints, and pause-on-exceptions
+- **Stepping controls**: Step over/into/out, continue to location, restart frame
+- **Variable inspection**: Explore locals/closure scopes, `this` preview, and drill down into object properties
+- **Expression evaluation**: Evaluate JavaScript expressions in the current call frame with console output capture
+- **Call stack analysis**: Inspect call stacks and pause-state information
+- **Source map support**: Debug TypeScript and other transpiled code with full source map support
+- **Console monitoring**: Capture and review console output during debugging sessions
 
 ## Installation
 
@@ -22,31 +23,23 @@ npm install devtools-debugger-mcp
 
 ## Configuration
 
-The server can be configured through environment variables in your MCP settings:
+Add the server to your MCP settings configuration:
 
 ```json
 {
   "devtools-debugger-mcp": {
     "command": "node",
-    "args": ["path/to/devtools-debugger-mcp/dist/index.js"],
-    "env": {
-      "CHROME_DEBUG_URL": "http://localhost:9222",
-      "CHROME_CONNECTION_TYPE": "direct",
-      "CHROME_ERROR_HELP": "custom error message"
-    }
+    "args": ["path/to/devtools-debugger-mcp/dist/index.js"]
   }
 }
 ```
 
-Alternatively, if installed locally, you can point to the CLI binary:
+Alternatively, if installed globally, you can use the CLI binary:
 
 ```json
 {
   "devtools-debugger-mcp": {
-    "command": "devtools-debugger-mcp",
-    "env": {
-      "CHROME_DEBUG_URL": "http://localhost:9222"
-    }
+    "command": "devtools-debugger-mcp"
   }
 }
 ```
@@ -115,149 +108,44 @@ Notes
 - The server buffers console output between pauses; fetch via `includeConsole` on step/resume or with `read_console`.
 - Use `set_output_format({ format: 'text' | 'json' | 'both' })` to set default response formatting.
 
-### Environment Variables
 
-- `CHROME_DEBUG_URL`: The URL where Chrome's remote debugging interface is available (default: http://localhost:9222)
-- `CHROME_CONNECTION_TYPE`: Connection type identifier for logging (e.g., "direct", "ssh-tunnel", "docker")
-- `CHROME_ERROR_HELP`: Custom error message shown when connection fails
 
-## Setup Guide
+## Available Tools
 
-### Native Setup (Windows/Mac/Linux)
+This MCP server provides the following Node.js debugging tools. All tools support optional `format` parameter (`'text'` or `'json'`) to control response formatting.
 
-1. Launch Chrome with remote debugging enabled:
-   ```bash
-   # Windows
-   "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222
+### Session Management
+- **`start_node_debug`** - Launch a Node.js script with debugging enabled
+- **`stop_debug_session`** - Terminate the debugging session and clean up
 
-   # Mac
-   /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --remote-debugging-port=9222
+### Breakpoint Management  
+- **`set_breakpoint`** - Set a breakpoint at a specific file and line
+- **`set_breakpoint_condition`** - Set a conditional breakpoint or breakpoint by URL regex
+- **`add_logpoint`** - Add a logpoint that logs messages when hit
+- **`set_exception_breakpoints`** - Configure pause-on-exception behavior
 
-   # Linux
-   google-chrome --remote-debugging-port=9222
-   ```
+### Execution Control
+- **`resume_execution`** - Continue execution to the next breakpoint or completion
+- **`step_over`** - Step over the current line
+- **`step_into`** - Step into function calls
+- **`step_out`** - Step out of the current function
+- **`continue_to_location`** - Run until reaching a specific location
+- **`restart_frame`** - Restart execution from a specific call frame
 
-2. Configure MCP settings:
-   ```json
-   {
-     "env": {
-       "CHROME_DEBUG_URL": "http://localhost:9222",
-       "CHROME_CONNECTION_TYPE": "direct"
-     }
-   }
-   ```
+### Inspection and Analysis
+- **`inspect_scopes`** - Examine local variables, closures, and `this` context
+- **`evaluate_expression`** - Evaluate JavaScript expressions in the current context
+- **`get_object_properties`** - Drill down into object properties
+- **`list_call_stack`** - View the current call stack
+- **`get_pause_info`** - Get information about the current pause state
 
-### WSL Setup
+### Utilities
+- **`list_scripts`** - List all loaded scripts
+- **`get_script_source`** - Retrieve source code for scripts
+- **`blackbox_scripts`** - Configure scripts to skip during debugging
+- **`read_console`** - Read console output captured during debugging
 
-When running in WSL, you'll need to set up an SSH tunnel to connect to Chrome running on Windows:
-
-1. Launch Chrome on Windows with remote debugging enabled
-2. Create an SSH tunnel:
-   ```bash
-   ssh -N -L 9222:localhost:9222 windowsuser@host
-   ```
-3. Configure MCP settings:
-   ```json
-   {
-     "env": {
-       "CHROME_DEBUG_URL": "http://localhost:9222",
-       "CHROME_CONNECTION_TYPE": "ssh-tunnel",
-       "CHROME_ERROR_HELP": "Make sure the SSH tunnel is running: ssh -N -L 9222:localhost:9222 windowsuser@host"
-     }
-   }
-   ```
-
-### Docker Setup
-
-When running Chrome in Docker:
-
-1. Launch Chrome container:
-   ```bash
-   docker run -d --name chrome -p 9222:9222 chromedp/headless-shell
-   ```
-
-2. Configure MCP settings:
-   ```json
-   {
-     "env": {
-       "CHROME_DEBUG_URL": "http://localhost:9222",
-       "CHROME_CONNECTION_TYPE": "docker"
-     }
-   }
-   ```
-
-## Tools
-
-### list_tabs
-Lists all available Chrome tabs.
-
-### execute_script
-Executes JavaScript code in a specified tab.
-Parameters:
-- `tabId`: ID of the Chrome tab
-- `script`: JavaScript code to execute
-
-### capture_screenshot
-Captures a screenshot of a specified tab, automatically optimizing it for AI model consumption.
-Parameters:
-- `tabId`: ID of the Chrome tab
-- `format`: Image format (jpeg/png) - Note: This is only for initial capture. Final output uses WebP with PNG fallback
-- `quality`: JPEG quality (1-100) - Note: For initial capture only
-- `fullPage`: Capture full scrollable page
-
-Image Processing:
-1. WebP Optimization (Primary Format):
-   - First attempt: WebP with quality 80 and high compression effort
-   - Second attempt: WebP with quality 60 and near-lossless compression if first attempt exceeds 1MB
-2. PNG Fallback:
-   - Only used if WebP processing fails
-   - Includes maximum compression and color palette optimization
-3. Size Constraints:
-   - Maximum dimensions: 900x600 (maintains aspect ratio)
-   - Maximum file size: 1MB
-   - Progressive size reduction if needed
-
-### capture_network_events
-Monitors and captures network events from a specified tab.
-Parameters:
-- `tabId`: ID of the Chrome tab
-- `duration`: Duration in seconds to capture
-- `filters`: Optional type and URL pattern filters
-
-### load_url
-Navigates a tab to a specified URL.
-Parameters:
-- `tabId`: ID of the Chrome tab
-- `url`: URL to load
-
-### query_dom_elements
-Queries and retrieves detailed information about DOM elements matching a CSS selector.
-Parameters:
-- `tabId`: ID of the Chrome tab
-- `selector`: CSS selector to find elements
-Returns:
-- Array of DOM elements with properties including:
-  - `nodeId`: Unique identifier for the node
-  - `tagName`: HTML tag name
-  - `textContent`: Text content of the element
-  - `attributes`: Object containing all element attributes
-  - `boundingBox`: Position and dimensions of the element
-  - `isVisible`: Whether the element is visible
-  - `ariaAttributes`: ARIA attributes for accessibility
-
-### click_element
-Clicks on a DOM element and captures any console output triggered by the click.
-Parameters:
-- `tabId`: ID of the Chrome tab
-- `selector`: CSS selector to find the element to click
-Returns:
-- Object containing:
-  - `message`: Success/failure message
-  - `consoleOutput`: Array of console messages triggered by the click
-
-### Node.js Debugger Tools
-
-See the dedicated "Node.js Debugging" section above for quickstart and the complete tool reference.
+For detailed usage examples and parameter descriptions, see the "Node.js Debugging" section above.
 
 ## License
 
