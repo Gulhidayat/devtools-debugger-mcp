@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (optional)
+        if: ${{ always() }}
+        run: |
+          npm run lint || echo "Lint warnings/errors (non-blocking)"
+
+      - name: Unit tests
+        env:
+          DEBUG_CDP_TEST: 'true'
+        run: npm test
+
+      - name: E2E (MCP stdio) tests
+        env:
+          DEBUG_CDP_TEST: 'true'
+        run: npm run test:e2e
+
